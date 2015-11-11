@@ -138,14 +138,15 @@ def routes_delete(delorme, route_id):
 
 
 @cli.command('import')
-@click.argument('file', type=click.Path(exists=True))
+@click.argument('file', nargs=-1, type=click.Path(exists=True))
 @click.pass_obj
 @click.pass_context
 def import_data(ctx, delorme, file):
-    result = delorme.import_data(file)
-    headers = ['RouteId', 'Label']
-    imported = [[r[k] for k in headers] for r in result['RouteImports']]
-    print tabulate(imported, headers, tablefmt='simple')
+    for f in file:
+        result = delorme.import_data(f)
+        headers = ['RouteId', 'Label']
+        imported = [[r[k] for k in headers] for r in result['RouteImports']]
+        print tabulate(imported, headers, tablefmt='simple')
 
 
 if __name__ == '__main__':
