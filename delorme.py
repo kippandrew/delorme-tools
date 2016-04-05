@@ -4,10 +4,8 @@ import os
 import sys
 import logging
 import re
-import urllib
 
 import click
-import collections
 import requests
 import iso8601
 import ConfigParser
@@ -184,8 +182,6 @@ class Delorme(object):
         if not r.ok:
             self._error(r)
 
-            # print r.content
-
 
 def _setup_logging(verbose=False):
     # configure loggers
@@ -212,14 +208,15 @@ def _default_config():
 
 def _read_config(file):
 
+    # load default configuration
     config = _default_config()
 
     if not os.path.exists(file):
         logger.debug("Configuration file not found: %s", file)
         return
 
+    # read configuration file
     config.read(file)
-
     return config
 
 
@@ -228,6 +225,7 @@ def _write_config(config, file):
         if not click.confirm('Do you want to overwrite {}?'.format(file)):
             return
 
+    # save configuration file
     with open(file, 'w') as fp:
         config.write(fp)
 
@@ -287,7 +285,6 @@ def list_routes(delorme, quiet):
     headers = ['Route Id', 'Name', 'Hidden', 'Map Share', 'Created Date', 'Modified Date']
     routes = []
     for r in delorme.get_routes():
-        # print(r)
         routes.append([r['RouteID'],
                        r['Label'],
                        'Yes' if r['HiddenOnDevice'] else 'No',
@@ -332,7 +329,7 @@ def import_data(ctx, delorme, file):
 @click.pass_obj
 @click.pass_context
 def export_data(ctx, delorme, device_id):
-    result = delorme.export_data(device_id, 64591)
+    delorme.export_data(device_id, 64591)
 
 
 if __name__ == '__main__':
