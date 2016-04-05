@@ -10,6 +10,7 @@ import click
 import collections
 import requests
 import iso8601
+import ConfigParser
 
 from tabulate import tabulate
 
@@ -118,8 +119,6 @@ class Delorme(object):
 
     def get_routes(self):
         data = self._request('/Routes').json()
-        for r in data:
-            r['CreatedDate'] = from_timestamp(r['CreatedDate'])
         return data
 
     def save_route(self, route_data):
@@ -164,9 +163,9 @@ class Delorme(object):
 
         # get filter
         if from_date:
-            filter = [{'criteriaId': 12, 'value': None, 'values':[to_timestamp(from_date)]}]
+            filter = [{'criteriaId': 12, 'value': None, 'values': [to_timestamp(from_date)]}]
         elif from_date and to_date:
-            filter = [{'criteriaId': 11, 'value': None, 'values':[to_timestamp(from_date), to_timestamp(to_date)]}]
+            filter = [{'criteriaId': 11, 'value': None, 'values': [to_timestamp(from_date), to_timestamp(to_date)]}]
         else:
             filter = [{'criteriaId': 10, 'value': 1}]  # most recent track
 
@@ -185,24 +184,95 @@ class Delorme(object):
         if not r.ok:
             self._error(r)
 
-        # print r.content
+            # print r.content
 
-@click.group()
-@click.option('--username', '-u', default=None, prompt=True)
-@click.option('--password', '-p', default=None, prompt=True, hide_input=True)
-@click.option('--verbose', is_flag=True)
-@click.pass_context
-def cli(ctx, username, password, verbose):
-    ctx.obj = Delorme(username, password)
 
+def _setup_logging(verbose=False):
+    # configure loggers
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setLevel(logging.NOTSET)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+    # enable debug logging
     if verbose:
         logger.setLevel(logging.DEBUG)
+
+
+def _get_config_file():
+    return os.path.join(os.getenv('HOME'), '.delorme.conf')
+
+
+def _default_config():
+    config = ConfigParser.SafeConfigParser()
+    config.add_section('credentials')
+    return config
+
+
+def _read_config(file):
+
+    config = _default_config()
+
+    if not os.path.exists(file):
+        logger.debug("Configuration file not found: %s", file)
+        return
+
+    config.read(file)
+
+    return config
+
+
+def _write_config(config, file):
+    if os.path.exists(file):
+        if not click.confirm('Do you want to overwrite {}?'.format(file)):
+            return
+
+    with open(file, 'w') as fp:
+        config.write(fp)
+
+
+@click.group()
+@click.option('--username', '-u', default=None)
+@click.option('--password', '-p', default=None, hide_input=True)
+@click.option('--verbose', is_flag=True)
+@click.pass_context
+def cli(ctx, username, password, verbose):
+
+    # read configuration
+    config_file = _get_config_file()
+    config = _read_config(config_file)
+
+    # get username
+    prompt_for_save = False
+    if username is not None:
+        config.set('credentials', 'username', username)
+    else:
+        if not config.has_option('credentials', 'username') or config.get('credentials', 'username') is None:
+            config.set('credentials', 'username', click.prompt('Username'))
+            prompt_for_save = True
+
+    # get password
+    if password is not None:
+        config.set('credentials', 'password', password)
+    else:
+        if not config.has_option('credentials', 'password') or config.get('credentials', 'password') is None:
+            config.set('credentials', 'password', click.prompt('Password', hide_input=True).strip())
+            prompt_for_save = True
+
+    if prompt_for_save:
+        if click.confirm('Do you want to save your configuration?'):
+            _write_config(config, config_file)
+
+    # configure logging
+    _setup_logging()
+
+    # initialize Delorme API
+    ctx.obj = Delorme(config.get('credentials', 'username'), config.get('credentials', 'password'))
+    try:
+        ctx.obj.login()
+    except DelormeError as ex:
+        raise click.ClickException(str(ex))
 
 
 @cli.group()
@@ -211,11 +281,23 @@ def route():
 
 
 @route.command('list')
+@click.option('--quiet', '-q', default=False, is_flag=True)
 @click.pass_obj
-def list_routes(delorme):
-    headers = ['RouteID', 'Label', 'CreatedDate', 'ModifiedDate']
-    routes = [[r[k] for k in headers] for r in delorme.get_routes()]
-    print tabulate(routes, map(uncamel, headers), tablefmt="simple")
+def list_routes(delorme, quiet):
+    headers = ['Route Id', 'Name', 'Hidden', 'Map Share', 'Created Date', 'Modified Date']
+    routes = []
+    for r in delorme.get_routes():
+        # print(r)
+        routes.append([r['RouteID'],
+                       r['Label'],
+                       'Yes' if r['HiddenOnDevice'] else 'No',
+                       'Yes' if r['ShowOnMapShare'] else 'No',
+                       from_timestamp(r['CreatedDate']),
+                       from_timestamp(r['ModifiedDate'])])
+    if quiet:
+        print '\n'.join(map(str, [r[0] for r in routes]))
+    else:
+        print tabulate(routes, headers, tablefmt="simple")
 
 
 @route.command('show')
